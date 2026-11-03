@@ -13,6 +13,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.KeyEvent;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
@@ -37,6 +39,17 @@ public class MainActivity extends Activity {
     private GeolocationPermissions.Callback geoCallback;
     private String geoOrigin;
     private int notifyId = 100;
+    private final Handler pollHandler = new Handler(Looper.getMainLooper());
+    private final Runnable pollTick = new Runnable() {
+        @Override
+        public void run() {
+            // 原生定时唤起网页轮询：绕过安卓对后台网页定时器的冻结
+            if (web != null) {
+                web.evaluateJavascript("if(window.__kaowuNativePoll){window.__kaowuNativePoll()}", null);
+            }
+            pollHandler.postDelayed(this, 15000);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,8 +67,12 @@ public class MainActivity extends Activity {
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setSupportZoom(false);
+        // 保持渲染器后台不被冻结（否则网页轮询停止、通知失效）
+        if (Build.VERSION.SDK_INT >= 26) {
+            web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+        }
         // 注入原生版本号到 UA：网页端靠它做「发现新版本」检测（DailyTrailApp/x.y.z;code=N）
-        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/2.6.0;code=26");
+        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/2.7.0;code=27");
 
         // 分享码门禁依赖 Cookie，允许并持久化
         CookieManager cm = CookieManager.getInstance();
@@ -132,7 +149,18 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFY);
         }
 
+        // 前台服务保活进程 + 原生定时唤起网页轮询（锁屏/后台也持续检测新消息）
+        startService(new Intent(this, PollService.class));
+        pollHandler.postDelayed(pollTick, 15000);
+
         web.loadUrl(URL);
+    }
+
+    @Override
+    protected void onDestroy() {
+        pollHandler.removeCallbacks(pollTick);
+        stopService(new Intent(this, PollService.class));
+        super.onDestroy();
     }
 
     private void showNotification(String title, String body) {
