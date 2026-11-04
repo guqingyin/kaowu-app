@@ -51,7 +51,7 @@ public class PollService extends Service {
                     pollOnce();
                     // 每 3 轮（约 1 分钟）上报一次在线状态，让 web 端的「最后活跃」准确
                     tickCount++;
-                    if (tickCount % 3 === 0) reportClient();
+                    if (tickCount % 3 == 0) reportClient();
                 }
             } catch (Exception e) {
                 Log.w(TAG, "poll error: " + e.getMessage());
