@@ -15,7 +15,7 @@ android {
     // 固定签名证书：证书不变，新版本即可直接覆盖安装，无需卸载
     // CI 由 GitHub Secrets 注入；本地打包放到项目根目录 keystore-kaowu.p12 并设置环境变量即可
     def ksPath = System.getenv('KAOWU_KEYSTORE') ?: 'keystore-kaowu.p12'
-    def ksFile = file(ksPath)
+    def ksFile = rootProject.file(ksPath)
 
     signingConfigs {
         release {
