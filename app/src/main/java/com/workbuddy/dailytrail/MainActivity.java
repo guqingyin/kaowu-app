@@ -82,7 +82,7 @@ public class MainActivity extends Activity {
             web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         }
         // 注入原生版本号到 UA：网页端靠它做「发现新版本」检测（DailyTrailApp/x.y.z;code=N）
-        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/3.3.0;code=34");
+        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/3.3.1;code=35");
 
         // 分享码门禁依赖 Cookie，允许并持久化
         CookieManager cm = CookieManager.getInstance();
@@ -257,6 +257,27 @@ public class MainActivity extends Activity {
                     .edit()
                     .putString("access_token", accessToken)
                     .putString("user_id", userId)
+                    .apply();
+        }
+
+        /**
+         * v3.3.1：连 refresh_token 和过期时间一起交给原生层。
+         * 后台长期不打开 App 时，前台服务靠它自己续期，否则 access_token 一过期就再也收不到通知。
+         */
+        @JavascriptInterface
+        public void setSessionEx(String accessToken, String userId, String refreshToken, String expiresAt) {
+            if (accessToken == null || accessToken.isEmpty() || userId == null || userId.isEmpty()) return;
+            long exp = 0;
+            try {
+                exp = Long.parseLong(expiresAt);
+            } catch (Exception ignored) {
+            }
+            getSharedPreferences("kaowu", MODE_PRIVATE)
+                    .edit()
+                    .putString("access_token", accessToken)
+                    .putString("user_id", userId)
+                    .putString("refresh_token", refreshToken == null ? "" : refreshToken)
+                    .putLong("expires_at", exp)
                     .apply();
         }
     }
