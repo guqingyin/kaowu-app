@@ -82,7 +82,7 @@ public class MainActivity extends Activity {
             web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         }
         // 注入原生版本号到 UA：网页端靠它做「发现新版本」检测（DailyTrailApp/x.y.z;code=N）
-        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/3.2.0;code=33");
+        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/3.3.0;code=34");
 
         // 分享码门禁依赖 Cookie，允许并持久化
         CookieManager cm = CookieManager.getInstance();
@@ -160,7 +160,12 @@ public class MainActivity extends Activity {
         }
 
         // 前台服务保活进程 + 原生定时唤起网页轮询（锁屏/后台也持续检测新消息）
-        startService(new Intent(this, PollService.class));
+        Intent svc = new Intent(this, PollService.class);
+        if (Build.VERSION.SDK_INT >= 26) {
+            startForegroundService(svc);
+        } else {
+            startService(svc);
+        }
         pollHandler.postDelayed(pollTick, 15000);
 
         web.loadUrl(URL);
@@ -181,7 +186,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         pollHandler.removeCallbacks(pollTick);
-        stopService(new Intent(this, PollService.class));
+        // 注意：不在这里 stopService —— 让前台服务继续跑，锁屏/切后台也能收消息
         super.onDestroy();
     }
 

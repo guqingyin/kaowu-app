@@ -42,6 +42,8 @@ public class PollService extends Service {
     private Handler handler;
     private int notifyId = 500;
     private int tickCount = 0;
+    private long lastLogAt = 0;
+    private boolean lastHttpOk = false;
 
     private final Runnable tick = new Runnable() {
         @Override
@@ -64,13 +66,32 @@ public class PollService extends Service {
     private void reportClient() {
         SharedPreferences sp = getSharedPreferences("kaowu", MODE_PRIVATE);
         String token = sp.getString("access_token", "");
-        if (token.isEmpty()) return;
+        if (token.isEmpty()) {
+            logMsg("native: 没有拿到登录凭证，跳过轮询", token, true);
+            return;
+        }
         try {
             String body = "{\"p_platform\":\"android\",\"p_version\":\"" + BuildConfig.VERSION_NAME
                     + "\",\"p_code\":" + BuildConfig.VERSION_CODE + ",\"p_ua\":\"native-service\"}";
             post("/rpc/report_client_info", token, body);
         } catch (Exception e) {
             Log.w(TAG, "report fail: " + e.getMessage());
+        }
+    }
+
+    /** 把原生侧的状况写进云端日志，便于远程排查（限流：5 分钟内最多一条；错误不限） */
+    private void logMsg(String msg, String token, boolean always) {
+        if (token == null || token.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        if (!always && now - lastLogAt < 300000) return;
+        lastLogAt = now;
+        try {
+            JSONObject o = new JSONObject();
+            o.put("p_kind", "native");
+            o.put("p_detail", msg);
+            post("/rpc/log_client_event", token, o.toString());
+        } catch (Exception e) {
+            Log.w(TAG, "log fail: " + e.getMessage());
         }
     }
 
@@ -121,7 +142,12 @@ public class PollService extends Service {
             handler = new Handler(thread.getLooper());
             handler.postDelayed(tick, 6000);
         }
+        logMsg("native: 服务已启动 v" + BuildConfig.VERSION_NAME, sp_token(), true);
         return START_STICKY;
+    }
+
+    private String sp_token() {
+        return getSharedPreferences("kaowu", MODE_PRIVATE).getString("access_token", "");
     }
 
     @Override
@@ -154,8 +180,13 @@ public class PollService extends Service {
 
         long lastSeen = sp.getLong("native_last_id", 0);
         JSONArray rows = fetch("/messages?select=id,conversation_id,sender_id,sender_name,content,message_type,created_at&order=id.desc&limit=15", token);
-        if (rows == null) return;
+        if (rows == null) {
+            logMsg("native: 查询失败（网络或凭证被拒），lastId=" + lastSeen, token, true);
+            return;
+        }
+        lastHttpOk = true;
 
+        int fresh = 0;
         long maxId = lastSeen;
         for (int i = rows.length() - 1; i >= 0; i--) { // 从旧到新
             JSONObject m = rows.optJSONObject(i);
@@ -165,9 +196,15 @@ public class PollService extends Service {
             if (lastSeen == 0) continue;      // 首次仅建立基线
             if (id <= lastSeen) continue;
             if (uid.equals(m.optString("sender_id", ""))) continue;
+            fresh++;
             showMessage(m.optString("sender_name", "成员"), m.optString("content", ""));
         }
         if (maxId != lastSeen) sp.edit().putLong("native_last_id", maxId).apply();
+        if (fresh > 0) {
+            logMsg("native: 发出 " + fresh + " 条通知（lastId=" + maxId + "）", token, true);
+        } else if (!lastHttpOk) {
+            logMsg("native: 轮询正常（无新消息）", token, false);
+        }
     }
 
     private JSONArray fetch(String path, String token) {
