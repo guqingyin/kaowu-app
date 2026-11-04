@@ -9,6 +9,7 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -29,7 +30,7 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final String URL = "https://daily-trail-78645.app.workbuddy.host/?sharecode=DLOMHYV66G";
-    private static final String CHANNEL_ID = "kaowu_messages";
+    private static final String CHANNEL_ID = "kaowu_messages_v2";
     private static final int REQ_NOTIFY = 2001;
     private static final int REQ_LOCATION = 2002;
     private static final int REQ_FILE = 2003;
@@ -72,7 +73,7 @@ public class MainActivity extends Activity {
             web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         }
         // 注入原生版本号到 UA：网页端靠它做「发现新版本」检测（DailyTrailApp/x.y.z;code=N）
-        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/2.7.0;code=27");
+        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/2.8.0;code=28");
 
         // 分享码门禁依赖 Cookie，允许并持久化
         CookieManager cm = CookieManager.getInstance();
@@ -178,8 +179,14 @@ public class MainActivity extends Activity {
         b.setContentText(body == null ? "" : body);
         b.setStyle(new Notification.BigTextStyle().bigText(body == null ? "" : body));
         b.setAutoCancel(true);
+        b.setSound(soundUri()); // API 26 以下走这里，26+ 由通知渠道决定
+        b.setVibrate(new long[]{0, 120, 80, 120});
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         nm.notify(notifyId++, b.build());
+    }
+
+    private Uri soundUri() {
+        return Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.notify_sound);
     }
 
     private void ensureChannel() {
@@ -187,6 +194,14 @@ public class MainActivity extends Activity {
             NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "消息通知",
                     NotificationManager.IMPORTANCE_HIGH);
             ch.setDescription("新消息、任务与@提醒");
+            // 自定义提示音（双音「叮-咚」）
+            AudioAttributes attrs = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build();
+            ch.setSound(soundUri(), attrs);
+            ch.enableVibration(true);
+            ch.setVibrationPattern(new long[]{0, 120, 80, 120});
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             nm.createNotificationChannel(ch);
         }
