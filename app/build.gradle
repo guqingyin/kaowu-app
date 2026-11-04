@@ -8,8 +8,8 @@ android {
         applicationId 'com.workbuddy.dailytrail'
         minSdk 24
         targetSdk 34
-        versionCode 32
-        versionName '3.1.1'
+        versionCode 33
+        versionName '3.2.0'
     }
 
     // 固定签名证书：证书不变，新版本即可直接覆盖安装，无需卸载
@@ -44,5 +44,10 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        // 供原生上报版本号使用
+        buildConfig true
     }
 }

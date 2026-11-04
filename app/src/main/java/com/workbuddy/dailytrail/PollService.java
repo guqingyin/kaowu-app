@@ -41,18 +41,58 @@ public class PollService extends Service {
     private HandlerThread thread;
     private Handler handler;
     private int notifyId = 500;
+    private int tickCount = 0;
 
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
             try {
-                if (!appVisible) pollOnce();
+                if (!appVisible) {
+                    pollOnce();
+                    // 每 3 轮（约 1 分钟）上报一次在线状态，让 web 端的「最后活跃」准确
+                    tickCount++;
+                    if (tickCount % 3 === 0) reportClient();
+                }
             } catch (Exception e) {
                 Log.w(TAG, "poll error: " + e.getMessage());
             }
             if (handler != null) handler.postDelayed(this, POLL_INTERVAL);
         }
     };
+
+    /** 原生层直接上报在线状态（网页被冻结也能维持「最后活跃」） */
+    private void reportClient() {
+        SharedPreferences sp = getSharedPreferences("kaowu", MODE_PRIVATE);
+        String token = sp.getString("access_token", "");
+        if (token.isEmpty()) return;
+        try {
+            String body = "{\"p_platform\":\"android\",\"p_version\":\"" + BuildConfig.VERSION_NAME
+                    + "\",\"p_code\":" + BuildConfig.VERSION_CODE + ",\"p_ua\":\"native-service\"}";
+            post("/rpc/report_client_info", token, body);
+        } catch (Exception e) {
+            Log.w(TAG, "report fail: " + e.getMessage());
+        }
+    }
+
+    private void post(String path, String token, String body) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(BASE + path).openConnection();
+            conn.setConnectTimeout(12000);
+            conn.setReadTimeout(12000);
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("apikey", API_KEY);
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+            conn.getOutputStream().write(body.getBytes("utf-8"));
+            Log.i(TAG, "report " + conn.getResponseCode());
+        } catch (Exception e) {
+            Log.w(TAG, "post fail: " + e.getMessage());
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
 
     @Override
     public IBinder onBind(Intent intent) {
