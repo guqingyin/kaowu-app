@@ -6,16 +6,53 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ServiceInfo;
+import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
+import android.util.Log;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 /**
- * 前台保活服务：唯一职责是提升进程优先级，避免安卓冻结 WebView（网页轮询因此停止）。
- * 实际的消息检测由 MainActivity 定时对 WebView 执行 window.__kaowuNativePoll() 完成。
+ * 原生轮询服务：不依赖 WebView，自己在后台定时查数据库、直接发系统通知。
+ * 即使网页被安卓冻结/回收，提醒依然有效。
  */
 public class PollService extends Service {
+    private static final String TAG = "PollService";
     private static final String CHANNEL_ID = "kaowu_service";
+    private static final String MSG_CHANNEL_ID = "kaowu_messages_v2";
+    private static final String BASE = "https://daily-trail-78645.app.workbuddy.host/.cloud/database/rest";
+    private static final String API_KEY = "wbpk_XrCfFEr0yAsY946ghnW29f_jQcMF3iXdy3as1jlMBIDOtc2IQfDaTFI";
+    private static final int POLL_INTERVAL = 20000;
+
+    /** 应用在前台时交给网页处理，避免重复提醒 */
+    public static volatile boolean appVisible = false;
+
+    private HandlerThread thread;
+    private Handler handler;
+    private int notifyId = 500;
+
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                if (!appVisible) pollOnce();
+            } catch (Exception e) {
+                Log.w(TAG, "poll error: " + e.getMessage());
+            }
+            if (handler != null) handler.postDelayed(this, POLL_INTERVAL);
+        }
+    };
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -24,13 +61,7 @@ public class PollService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(CHANNEL_ID) == null) {
-            NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "后台保活",
-                    NotificationManager.IMPORTANCE_MIN);
-            ch.setDescription("保持消息提醒可用");
-            nm.createNotificationChannel(ch);
-        }
+        ensureChannel();
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
@@ -39,10 +70,122 @@ public class PollService extends Service {
         b.setContentText("保持消息提醒可用");
         b.setOngoing(true);
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(3001, b.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            startForeground(3001, b.build(), FgType.specialUse());
         } else {
             startForeground(3001, b.build());
         }
+
+        if (thread == null) {
+            thread = new HandlerThread("kaowu-poll");
+            thread.start();
+            handler = new Handler(thread.getLooper());
+            handler.postDelayed(tick, 6000);
+        }
         return START_STICKY;
+    }
+
+    @Override
+    public void onDestroy() {
+        if (handler != null) handler.removeCallbacks(tick);
+        if (thread != null) thread.quitSafely();
+        handler = null;
+        thread = null;
+        super.onDestroy();
+    }
+
+    private void ensureChannel() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+                NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "后台保活",
+                        NotificationManager.IMPORTANCE_MIN);
+                ch.setDescription("保持消息提醒可用");
+                nm.createNotificationChannel(ch);
+            }
+        }
+    }
+
+    /** 查一次最新消息，对新的、非本人发的消息发系统通知 */
+    private void pollOnce() {
+        SharedPreferences sp = getSharedPreferences("kaowu", MODE_PRIVATE);
+        String token = sp.getString("access_token", "");
+        String uid = sp.getString("user_id", "");
+        if (token.isEmpty() || uid.isEmpty()) return;
+
+        long lastSeen = sp.getLong("native_last_id", 0);
+        JSONArray rows = fetch("/messages?select=id,conversation_id,sender_id,sender_name,content,message_type,created_at&order=id.desc&limit=15", token);
+        if (rows == null) return;
+
+        long maxId = lastSeen;
+        for (int i = rows.length() - 1; i >= 0; i--) { // 从旧到新
+            JSONObject m = rows.optJSONObject(i);
+            if (m == null) continue;
+            long id = m.optLong("id", 0);
+            if (id > maxId) maxId = id;
+            if (lastSeen == 0) continue;      // 首次仅建立基线
+            if (id <= lastSeen) continue;
+            if (uid.equals(m.optString("sender_id", ""))) continue;
+            showMessage(m.optString("sender_name", "成员"), m.optString("content", ""));
+        }
+        if (maxId != lastSeen) sp.edit().putLong("native_last_id", maxId).apply();
+    }
+
+    private JSONArray fetch(String path, String token) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(BASE + path).openConnection();
+            conn.setConnectTimeout(12000);
+            conn.setReadTimeout(12000);
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("apikey", API_KEY);
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+            conn.setRequestProperty("Accept", "application/json");
+            if (conn.getResponseCode() != 200) {
+                Log.w(TAG, "http " + conn.getResponseCode());
+                return null;
+            }
+            InputStream in = conn.getInputStream();
+            BufferedReader r = new BufferedReader(new InputStreamReader(in, "utf-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = r.readLine()) != null) sb.append(line);
+            r.close();
+            return new JSONArray(sb.toString());
+        } catch (Exception e) {
+            Log.w(TAG, "fetch fail: " + e.getMessage());
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private void showMessage(String sender, String content) {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        Notification.Builder b = Build.VERSION.SDK_INT >= 26
+                ? new Notification.Builder(this, MSG_CHANNEL_ID)
+                : new Notification.Builder(this);
+        b.setSmallIcon(R.mipmap.ic_launcher);
+        b.setContentTitle("新消息 · " + sender);
+        b.setContentText(content);
+        b.setStyle(new Notification.BigTextStyle().bigText(content));
+        b.setAutoCancel(true);
+        b.setSound(Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.notify_sound));
+        b.setVibrate(new long[]{0, 120, 80, 120});
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        nm.notify(notifyId++, b.build());
+    }
+
+    /** Android 14+ 前台服务类型（避免直接引用高版本常量导致低版本崩溃） */
+    private static class FgType {
+        static int specialUse() {
+            if (Build.VERSION.SDK_INT >= 34) {
+                return android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+            }
+            return 0;
+        }
     }
 }

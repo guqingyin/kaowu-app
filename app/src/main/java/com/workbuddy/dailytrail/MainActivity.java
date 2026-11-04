@@ -82,7 +82,7 @@ public class MainActivity extends Activity {
             web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         }
         // 注入原生版本号到 UA：网页端靠它做「发现新版本」检测（DailyTrailApp/x.y.z;code=N）
-        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/3.0.0;code=30");
+        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/3.1.0;code=31");
 
         // 分享码门禁依赖 Cookie，允许并持久化
         CookieManager cm = CookieManager.getInstance();
@@ -167,6 +167,18 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        PollService.appVisible = true;
+    }
+
+    @Override
+    protected void onPause() {
+        PollService.appVisible = false;
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
         pollHandler.removeCallbacks(pollTick);
         stopService(new Intent(this, PollService.class));
@@ -230,6 +242,17 @@ public class MainActivity extends Activity {
                     requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFY);
                 }
             });
+        }
+
+        /** 网页把登录凭证交给原生层，供后台轮询使用（WebView 被冻结也能继续查消息） */
+        @JavascriptInterface
+        public void setSession(String accessToken, String userId) {
+            if (accessToken == null || accessToken.isEmpty() || userId == null || userId.isEmpty()) return;
+            getSharedPreferences("kaowu", MODE_PRIVATE)
+                    .edit()
+                    .putString("access_token", accessToken)
+                    .putString("user_id", userId)
+                    .apply();
         }
     }
 
