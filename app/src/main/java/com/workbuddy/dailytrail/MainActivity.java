@@ -46,15 +46,6 @@ public class MainActivity extends Activity {
         public void run() {
             // 原生定时唤起网页轮询：绕过安卓对后台网页定时器的冻结
             if (web != null) {
-                try {
-                    web.onResume();
-                } catch (Exception ignored) {
-                }
-                try {
-                    // 关键：窗口不可见时 WebView 会暂停 JS 定时器，这里强制恢复
-                    web.resumeTimers();
-                } catch (Exception ignored) {
-                }
                 web.evaluateJavascript("if(window.__kaowuNativePoll){window.__kaowuNativePoll()}", null);
             }
             pollHandler.postDelayed(this, 15000);
@@ -82,7 +73,7 @@ public class MainActivity extends Activity {
             web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         }
         // 注入原生版本号到 UA：网页端靠它做「发现新版本」检测（DailyTrailApp/x.y.z;code=N）
-        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/3.3.1;code=35");
+        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/3.3.2;code=36");
 
         // 分享码门禁依赖 Cookie，允许并持久化
         CookieManager cm = CookieManager.getInstance();
@@ -160,27 +151,12 @@ public class MainActivity extends Activity {
         }
 
         // 前台服务保活进程 + 原生定时唤起网页轮询（锁屏/后台也持续检测新消息）
-        Intent svc = new Intent(this, PollService.class);
-        if (Build.VERSION.SDK_INT >= 26) {
-            startForegroundService(svc);
-        } else {
-            startService(svc);
-        }
+        // 用 startService 而非 startForegroundService：后者有「5 秒内必须 startForeground」的硬性超时，
+        // 在部分国产 ROM 上会被判超时直接杀掉服务；服务自己调 startForeground 即可，无需这个约束。
+        startService(new Intent(this, PollService.class));
         pollHandler.postDelayed(pollTick, 15000);
 
         web.loadUrl(URL);
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        PollService.appVisible = true;
-    }
-
-    @Override
-    protected void onPause() {
-        PollService.appVisible = false;
-        super.onPause();
     }
 
     @Override

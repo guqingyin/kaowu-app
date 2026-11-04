@@ -52,7 +52,7 @@ jobs:
           mkdir -p export
           ls -la app/build/outputs/apk/release/
           if [ -f app/build/outputs/apk/release/app-release.apk ]; then
-            cp app/build/outputs/apk/release/app-release.apk export/kaowu-3.3.1.apk
+            cp app/build/outputs/apk/release/app-release.apk export/kaowu-3.3.2.apk
           else
             echo "::error::没有生成已签名的 app-release.apk，签名配置未生效"
             exit 1
@@ -62,15 +62,15 @@ jobs:
       - name: Publish APK to Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: export/kaowu-3.3.1.apk
-          tag_name: v3.3.1
-          name: 惠城院考务中心 v3.3.1（后台通知修复版）
+          files: export/kaowu-3.3.2.apk
+          tag_name: v3.3.2
+          name: 惠城院考务中心 v3.3.2（恢复 v2.7.0 后台保活架子）
           body: |
-            - 修复后台收不到通知：原生轮询的凭证请求头写错，导致所有后台请求被网关 401 拒绝
-            - 登录凭证可自动续期，长期不打开 App 也不会失效
-            - 服务自己创建通知渠道（含 QQ 风格提示音），冷启动被系统拉起也能响
-            - 云端可查原生服务心跳日志，便于确认后台是否真的在跑
-            - 固定证书签名，可直接覆盖安装，不用卸载
+            - 后台通知链路恢复为 v2.7.0 验证过的方式：前台服务只负责保活，Activity 每 15 秒唤起网页轮询，网页通过原生桥发系统通知
+            - 服务不再查数据库、不再依赖登录凭证与请求头，去掉了 3.0~3.3.1 那套复杂链路
+            - 服务启动改回 startService，避开部分 ROM 对 startForegroundService 的 5 秒超时杀进程
+            - 保留固定证书签名、QQ 风格提示音、通知自检、年级、客户端分布等全部新功能
+            - 注意：若当前装的是 v2.7.0（早期调试签名），需先卸载一次才能装；之后升级都不用卸载
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
