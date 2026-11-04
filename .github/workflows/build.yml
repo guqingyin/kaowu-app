@@ -26,26 +26,41 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon
+      - name: Decode signing keystore
+        run: |
+          echo "${{ secrets.KAOWU_KEYSTORE_B64 }}" | base64 -d > keystore-kaowu.p12
+          ls -la keystore-kaowu.p12
+
+      - name: Build signed release APK
+        env:
+          KAOWU_STORE_PASS: ${{ secrets.KAOWU_STORE_PASS }}
+          KAOWU_KEY_ALIAS: ${{ secrets.KAOWU_KEY_ALIAS }}
+          KAOWU_KEY_PASS: ${{ secrets.KAOWU_KEY_PASS }}
+        run: gradle :app:assembleRelease --no-daemon
+
+      - name: Verify signature
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          ls -la "$APK"
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | tail -1)/apksigner" verify --print-certs "$APK" | head -8 || true
 
       - name: Collect APK
         run: |
           mkdir -p export
-          cp app/build/outputs/apk/debug/app-debug.apk export/kaowu-2.8.0.apk
+          cp app/build/outputs/apk/release/app-release.apk export/kaowu-2.9.0.apk
           ls -la export
 
       - name: Publish APK to Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: export/kaowu-2.8.0.apk
-          tag_name: v2.8.0
-          name: 惠城院考务中心 v2.8.0（自定义提示音）
+          files: export/kaowu-2.9.0.apk
+          tag_name: v2.9.0
+          name: 惠城院考务中心 v2.9.0（固定签名，可覆盖更新）
           body: |
-            - 新增：自定义消息提示音（双音叮咚）+ 震动
-            - 新增：原生定时唤起网页轮询，绕过后台定时器冻结
-            - 修复：首次打开即请求系统通知权限（Android 13+）
-            - 注意：请先卸载旧版本再安装本版本
+            - 固定证书签名：之后的新版本可直接覆盖安装，不用再卸载
+            - 自定义提示音（双音叮咚）+ 震动
+            - 原生前台保活轮询，锁屏/后台持续检测
+            - 说明：本版与之前调试签名不同，仍需卸载旧版一次；之后升级不再需要
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

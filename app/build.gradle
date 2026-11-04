@@ -8,14 +8,33 @@ android {
         applicationId 'com.workbuddy.dailytrail'
         minSdk 24
         targetSdk 34
-        versionCode 28
-        versionName '2.8.0'
+        versionCode 29
+        versionName '2.9.0'
+    }
+
+    // 固定签名证书：证书不变，新版本即可直接覆盖安装，无需卸载
+    // CI 由 GitHub Secrets 注入；本地打包放到项目根目录 keystore-kaowu.p12 并设置环境变量即可
+    def ksPath = System.getenv('KAOWU_KEYSTORE') ?: 'keystore-kaowu.p12'
+    def ksFile = file(ksPath)
+
+    signingConfigs {
+        release {
+            if (ksFile.exists()) {
+                storeFile ksFile
+                storeType 'PKCS12'
+                storePassword System.getenv('KAOWU_STORE_PASS') ?: ''
+                keyAlias System.getenv('KAOWU_KEY_ALIAS') ?: 'kaowu'
+                keyPassword System.getenv('KAOWU_KEY_PASS') ?: ''
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
+            if (ksFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
