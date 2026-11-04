@@ -8,8 +8,8 @@ android {
         applicationId 'com.workbuddy.dailytrail'
         minSdk 24
         targetSdk 34
-        versionCode 29
-        versionName '2.9.0'
+        versionCode 30
+        versionName '3.0.0'
     }
 
     // 固定签名证书：证书不变，新版本即可直接覆盖安装，无需卸载

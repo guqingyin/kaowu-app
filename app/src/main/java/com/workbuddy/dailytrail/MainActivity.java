@@ -46,6 +46,15 @@ public class MainActivity extends Activity {
         public void run() {
             // 原生定时唤起网页轮询：绕过安卓对后台网页定时器的冻结
             if (web != null) {
+                try {
+                    web.onResume();
+                } catch (Exception ignored) {
+                }
+                try {
+                    // 关键：窗口不可见时 WebView 会暂停 JS 定时器，这里强制恢复
+                    web.resumeTimers();
+                } catch (Exception ignored) {
+                }
                 web.evaluateJavascript("if(window.__kaowuNativePoll){window.__kaowuNativePoll()}", null);
             }
             pollHandler.postDelayed(this, 15000);
@@ -73,7 +82,7 @@ public class MainActivity extends Activity {
             web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         }
         // 注入原生版本号到 UA：网页端靠它做「发现新版本」检测（DailyTrailApp/x.y.z;code=N）
-        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/2.9.0;code=29");
+        s.setUserAgentString(s.getUserAgentString() + " DailyTrailApp/3.0.0;code=30");
 
         // 分享码门禁依赖 Cookie，允许并持久化
         CookieManager cm = CookieManager.getInstance();
